@@ -54,10 +54,9 @@ struct Pattern
 	Rule *left;
 	char head;
 	Rule *right;
-	Pattern *next_pattern;
 	int used;
 	Pattern *next;
-	Pattern() : left(0), right(0), next_pattern(0), next(0), used(0) {}
+	Pattern() : left(0), right(0), next(0), used(0) {}
 	void print()
 	{
 		printf("%c: ", state);
@@ -214,6 +213,23 @@ bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 		return matchRulePart(pattern, false, target->next, remainder);
 
 	return false;
+}
+
+bool canAbsorb(char symbol, Rule *target)
+{
+	return    target != 0
+		   && (target->symbol == '*' || target->symbol == '+' || target->symbol == '@')
+		   && (   ((target->children->symbol == symbol || target->children->symbol == '.') && target->children->next == 0)
+		       || canAbsorb(symbol, target->children))
+		   && (target->symbol != '*' || canAbsorb(symbol, target->next));
+}
+
+bool matchWholeRule(Rule *pattern, Rule *target)
+{
+	return    matchRule(pattern, target)
+		   || (   is_symbol(pattern->symbol)
+		       && canAbsorb(pattern->symbol, target)
+		       && matchRule(pattern->next, target));
 }			
 
 Pattern *patterns = 0;
@@ -239,8 +255,8 @@ bool find_matching3(Pattern *pattern)
 	for (Pattern *target = patterns; target != 0; target = target->next)
 		if (   pattern->state == target->state
 		    && pattern->head == target->head
-			&& matchRule(pattern->left, target->left)
-			&& matchRule(pattern->right, target->right))
+			&& matchWholeRule(pattern->left, target->left)
+			&& matchWholeRule(pattern->right, target->right))
 		{
 			if (verbose_level >= 1)
 			{
@@ -253,6 +269,38 @@ bool find_matching3(Pattern *pattern)
 			target->used++;
 			return true;
 		}
+	
+	if (pattern->left->symbol == '*')
+	{
+		pattern->left->symbol = '+';
+		bool result = find_matching3(pattern);
+		pattern->left->symbol = '*';
+		if (result)
+		{
+			Pattern pattern2 = *pattern;
+			pattern2.left = pattern->left->next;
+			if (find_matching3(&pattern2));
+				return true;
+		}
+	}
+	
+	if (pattern->right->symbol == '*')
+	{
+		pattern->right->symbol = '+';
+		bool result = find_matching3(pattern);
+		pattern->right->symbol = '*';
+		if (result)
+		{
+			Pattern pattern2 = *pattern;
+			pattern2.right = pattern->right->next;
+			if (find_matching3(&pattern2));
+				return true;
+		}
+	}
+	
+	printf("  (no match: ");
+	pattern->print();
+	printf(")\n");
 	return false;
 }
 
@@ -298,6 +346,64 @@ bool find_matching(Pattern *pattern)
 	return find_matching2(pattern);
 }
 
+void process_pattern(Pattern *pattern, Rule *new_pull, Rule *new_push, bool move_right, char head, const char *tr)
+{
+	Pattern *np = new Pattern;
+	np->state = tr[2];
+	np->head = head;
+	if (move_right)
+	{
+		np->right = new_pull;
+		np->left = new_push;
+	}
+	else
+	{
+		np->left = new_pull;
+		np->right = new_push;
+	}
+	
+	pattern->print();
+	printf(" (%c%c%c) ", tr[0], tr[1], tr[2]);
+	printf("=> ");
+	np->print();
+	printf("\n");
+	if (!find_matching(np))
+	{
+		printf("Error: no matching patterns\n");
+	}
+}
+
+void expand_pattern(Pattern *pattern, Rule *pull_rule, Rule *new_push, bool move_right, const char *tr)
+{
+	if (pull_rule->symbol == '@')
+	{
+		process_pattern(pattern, pull_rule, new_push, move_right, pull_rule->children->symbol, tr);
+	}
+	else if (pull_rule->symbol == '+' || pull_rule->symbol == '*')
+	{
+		Rule *new_pull = 0;
+		Rule **ref_new = &new_pull;
+		Rule *rule = pull_rule->children;
+		for (; rule != 0; rule = rule->next)
+		{
+			*ref_new = new Rule;
+			(*ref_new)->symbol = rule->symbol;
+			(*ref_new)->children = rule->children;
+			ref_new = &(*ref_new)->next;
+		}
+		*ref_new = new Rule;
+		(*ref_new)->symbol = '*';
+		(*ref_new)->children = pull_rule->children;
+		(*ref_new)->next = pull_rule->next;
+		expand_pattern(pattern, new_pull, new_push, move_right, tr);
+		if (pull_rule->symbol == '*')
+			expand_pattern(pattern, pull_rule->next, new_push, move_right, tr);
+	}
+	else
+	{
+		process_pattern(pattern, pull_rule->next, new_push, move_right, pull_rule->symbol, tr);
+	}
+}
 
 int main(int argc, char *argv[])
 {
@@ -434,74 +540,7 @@ int main(int argc, char *argv[])
 		new_push->symbol = tr[0];
 		new_push->next = push_rule;
 		
-		for (bool go = true; go && pull_rule != 0; pull_rule = pull_rule->next)
-		{
-			go = false;
-			
-			pattern->print();
-			printf(" (%c%c%c) ", tr[0], tr[1], tr[2]);
-			
-			// Remove first from pull rule
-			Pattern *np = new Pattern;
-			np->state = tr[2];
-			Rule *new_pull = 0;
-			
-			if (pull_rule->symbol == '@')
-			{
-				np->head = pull_rule->children->symbol;
-				new_pull = pull_rule;
-			}
-			else if (pull_rule->symbol == '+' || pull_rule->symbol == '*')
-			{
-				go = pull_rule->symbol == '*';
-				
-				Rule **ref_new = &new_pull;
-				Rule *rule = pull_rule->children;
-				if (!is_symbol(rule->symbol))
-				{
-					printf(" Not implemented yet\n");
-					break;
-				}
-				np->head = rule->symbol;
-				rule = rule->next;
-				for (; rule != 0; rule = rule->next)
-				{
-					*ref_new = new Rule;
-					(*ref_new)->symbol = rule->symbol;
-					(*ref_new)->children = rule->children;
-					ref_new = &(*ref_new)->next;
-				}
-				*ref_new = new Rule;
-				(*ref_new)->symbol = '*';
-				(*ref_new)->children = pull_rule->children;
-				(*ref_new)->next = pull_rule->next;
-			}
-			else
-			{
-				np->head = pull_rule->symbol;
-				new_pull = pull_rule->next;
-			}
-			
-			if (move_right)
-			{
-				np->right = new_pull;
-				np->left = new_push;
-			}
-			else
-			{
-				np->left = new_pull;
-				np->right = new_push;
-			}
-						
-			printf("=> ");
-			np->print();
-			pattern->next_pattern = np;
-			printf("\n");
-			if (!find_matching(np))
-			{
-				printf("Error: no matching patterns\n");
-			}
-		}
+		expand_pattern(pattern, pull_rule, new_push, move_right, tr);
 	}
 	
 	printf("\n\n");
