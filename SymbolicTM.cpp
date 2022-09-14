@@ -412,35 +412,56 @@ int main(int argc, char *argv[])
 			verbose_level = 1;
 		else if (strcmp(argv[i], "-vv") == 0)
 			verbose_level = 2;
-	printf("level = %d\n", verbose_level);
-	
 	
 	FILE *fin = stdin;
 	
 	char buffer[100];
 	
 	fgets(buffer, 100, fin);
-	//
-	for (char *s = buffer; *s != '\n'; s++)
-		if (*s == '0' + nr_symbols)
-			nr_symbols++;
-	
-	while (fgets(buffer, 100, fin))
+	if (strchr(buffer, '_') != 0)
 	{
+		int i = 0;
 		char *s = buffer;
-		while (*s == ' ' || *s == '\t') s++;
-		if (*s != 'A' + nr_states)
-			break;
-		s++;
-		for (int i = 0; i < nr_symbols; i++)
+		while (*s > ' ')
 		{
-			while (*s == ' ' || *s == '\t') s++;
-			for (int j = 0; j < 3 && *s != '\n'; j++)
-				tm[nr_states][i][j] = *s++;
+			if (*s == '_')
+			{
+				s++;
+				i = 0;
+				nr_states++;
+			}
+			else
+			{
+				for (int j = 0; j < 3 && *s != '\n'; j++)
+					tm[nr_states][i][j] = *s++;
+				i++;
+				if (i > nr_symbols)
+					nr_symbols = i;
+			}
 		}
-		nr_states++;
 	}
-	
+	else
+	{
+		for (char *s = buffer; *s != '\n'; s++)
+			if (*s == '0' + nr_symbols)
+				nr_symbols++;
+		
+		while (fgets(buffer, 100, fin))
+		{
+			char *s = buffer;
+			while (*s == ' ' || *s == '\t') s++;
+			if (*s != 'A' + nr_states)
+				break;
+			s++;
+			for (int i = 0; i < nr_symbols; i++)
+			{
+				while (*s == ' ' || *s == '\t') s++;
+				for (int j = 0; j < 3 && *s != '\n'; j++)
+					tm[nr_states][i][j] = *s++;
+			}
+			nr_states++;
+		}
+	}
 	
 	printf("  ");
 	for (int i = 0; i < nr_symbols; i++)
