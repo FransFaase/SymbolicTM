@@ -439,6 +439,7 @@ int main(int argc, char *argv[])
 					nr_symbols = i;
 			}
 		}
+		nr_states++;
 	}
 	else
 	{
