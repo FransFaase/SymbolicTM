@@ -75,7 +75,7 @@ Rule *parse_rule(char *&s, bool left)
 {
 	Rule *result = 0;
 	Rule **ref_rule = &result;
-	while (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != ')')
+	while (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != '\0' && *s != ')')
 	{
 		Rule *new_rule = new Rule;
 		if (*s == '(')
@@ -432,7 +432,7 @@ int main(int argc, char *argv[])
 			}
 			else
 			{
-				for (int j = 0; j < 3 && *s != '\n'; j++)
+				for (int j = 0; j < 3 && *s != '\n' && *s != '\0'; j++)
 					tm[nr_states][i][j] = *s++;
 				i++;
 				if (i > nr_symbols)
@@ -443,7 +443,7 @@ int main(int argc, char *argv[])
 	}
 	else
 	{
-		for (char *s = buffer; *s != '\n'; s++)
+		for (char *s = buffer; *s != '\n' && *s != '\0'; s++)
 			if (*s == '0' + nr_symbols)
 				nr_symbols++;
 		
@@ -457,7 +457,7 @@ int main(int argc, char *argv[])
 			for (int i = 0; i < nr_symbols; i++)
 			{
 				while (*s == ' ' || *s == '\t') s++;
-				for (int j = 0; j < 3 && *s != '\n'; j++)
+				for (int j = 0; j < 3 && *s != '\n' && *s != '\0'; j++)
 					tm[nr_states][i][j] = *s++;
 			}
 			nr_states++;
