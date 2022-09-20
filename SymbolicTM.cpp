@@ -179,7 +179,7 @@ bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 		int pattern_nr = 0;
 		bool pattern_more = false;
 		Rule *pattern2 = pattern;
-		for (; pattern2 != 0; pattern2 = pattern2->next)
+		for (; pattern2 != 0 && (target_more || pattern_nr < target_nr); pattern2 = pattern2->next)
 			if (pattern2->symbol == sym)
 				pattern_nr++;
 			else if (pattern2->children != 0 && pattern2->children->symbol == sym && pattern2->children->next == 0)
@@ -405,8 +405,12 @@ void expand_pattern(Pattern *pattern, Rule *pull_rule, Rule *new_push, bool move
 	}
 }
 
+void unit_tests();
+
 int main(int argc, char *argv[])
 {
+	unit_tests();
+
 	for (int i = 1; i < argc; i++)
 		if (strcmp(argv[i], "-v") == 0)
 			verbose_level = 1;
@@ -585,4 +589,32 @@ int main(int argc, char *argv[])
 		}
 	
 	return 0;
+}
+
+
+void rule_match_test(const char *name, const char *p, const char *t, int nr, bool left)
+{
+	int old_nr = nr_symbols;
+	nr_symbols = nr;
+	char buf[100];
+	strcpy(buf, p);
+	char *s = buf;
+	Rule *pattern = parse_rule(s, left);
+	strcpy(buf, t);
+	s = buf;
+	Rule *target = parse_rule(s, left);
+	if (!matchWholeRule(pattern, target))
+	{
+		printf("Error: unit test %s failed. ", name);
+		pattern->print(left); printf(" does not match ");
+		target->print(left); printf("\n");
+	}
+	nr_symbols = old_nr;
+}
+
+void unit_tests()
+{
+	//  Match not found #2  E: 0@10 1 101101(001)*0@" despite "E: (0)@(10)* 1 1(01)*101(001)*(0)@
+	rule_match_test("Issue#2", "0@10", "(0)@(10)*", 2, true);
+	rule_match_test("Issue#2", "101101(001)*0@", "1(01)*101(001)*(0)@", 2, false);
 }
