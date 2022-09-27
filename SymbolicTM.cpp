@@ -130,13 +130,31 @@ bool matchRule(Rule *pattern, Rule *target)
 	return matchRulePart(pattern, false, target, remainder) && remainder == 0;
 }
 
+#ifdef DEBUG
+int depth = 0;
+
+#define ENTER printf("%*.*s", depth, depth,""); depth += 2;
+#define BOOLRETURN(X) { bool r = X; depth -= 2; printf("%*.*s= %s\n", depth, depth,"", r ? "true" : "false"); return r; }
+#else
+#define ENTER
+#define BOOLRETURN(X) return X;
+#endif
+
 bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 {
+	ENTER
+#ifdef DEBUG
+	printf("matchRulePart "); if (pattern) pattern->print(false); printf(" %d ", plus); if (target) target->print(false); printf("\n");
+#endif
 	remainder = pattern;
 	if (target == 0)
-		return true;
+		BOOLRETURN(true)
 	if (pattern == 0)
-		return false;
+	{
+		while (target != 0 && target->symbol == '*')
+			target = target->next;
+		BOOLRETURN(target == 0)
+	}
 
 	if (   target->symbol == '@'
 		&& target->children->symbol == '.'
@@ -144,7 +162,7 @@ bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 		&& target->next == 0)
 	{
 		remainder = 0;
-		return true;
+		BOOLRETURN(true)
 	}
 	
 	char sym = '\0';
@@ -191,7 +209,7 @@ bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 			else
 				break;
 		if (target_more ? pattern_nr >= target_nr : !pattern_more && pattern_nr == target_nr)
-			return matchRulePart(pattern2, false, target2, remainder);
+			BOOLRETURN(matchRulePart(pattern2, false, target2, remainder))
 	}
 	
 	bool result = false;
@@ -199,98 +217,64 @@ bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 	         || (pattern->symbol == '*' && ((plus && target->symbol == '+') || target->symbol == '*')))
 	    && matchRule(pattern->children, target->children)
 		&& matchRulePart(pattern->next, false, target->next, remainder))
-		return true;
+		BOOLRETURN(true)
 		
 	if (target->symbol == '*' || target->symbol == '+')
 	{
 		Rule *intermediate = 0;
 		if (   matchRulePart(pattern, false, target->children, intermediate)
 			&& matchRulePart(intermediate, true, target, remainder))
-			return true;
+			BOOLRETURN(true)
 	}
 	
 	if (target->symbol == '*' || (plus && target->symbol == '+'))
-		return matchRulePart(pattern, false, target->next, remainder);
+		BOOLRETURN(matchRulePart(pattern, false, target->next, remainder))
 
-	return false;
+	BOOLRETURN(false)
 }
 
-
-char canAbsorb(Rule *head, int n, Rule *target)
+bool canAbsorb(Rule *head, Rule *target)
 {
-	return '-'; // The implementation below is incorrect
-	
-	// - means not
-	// h means head
-	// a means all
-	
-	if (target == 0)
-		return '-';
-		
-	if (is_symbol(target->symbol))
+	ENTER
+#ifdef DEBUG
+	printf("canAbsorb "); if (head) head->print(false); printf(" | "); if (target) target->print(false); printf("\n");
+#endif
+	for (; target != 0; target = target->next)
 	{
-		Rule *h = head;
-		Rule *t = target->children;
-		int i = 0;
-		for (; i < n && t != 0; i++, h = h->next, t = t->next)
-			if (h->symbol != t->symbol)
-				break;
-		if (i < n)
-			return '-';
-		while (h != 0 && h->symbol == '*')
-			h = h->next;
-		return h == 0 ? 'a' : '-';
+		if (target->symbol == '@')
+			BOOLRETURN(matchRule(head, target))
+		if (target->symbol != '+' && target->symbol != '*')
+			break;
+		bool start = false;
+		if (   (   (target->children->symbol != '+' && target->children->symbol != '*')
+			    || !matchRule(head, target->children->children))
+			&& !canAbsorb(head, target->children))
+			BOOLRETURN(false)
+		if (target->symbol == '+')
+			BOOLRETURN(true)
 	}
-
-	if (target->symbol == '@' && target->children->next == 0)
-	{
-		if (target->children->symbol != '.')
-		{
-			Rule *h = head;
-			for (int i = 0; i < n; i++, h = h->next)
-				if (h->symbol != target->children->symbol)
-					return '-';
-		}
-		return 'a';
-	}
-
-	// target->symbol == '*' || target->symbol == '+'
-	char child = canAbsorb(head, n, target->children);
-	
-	if (target->symbol == '+')
-		return child == '-' ? '-' : 'h';
-	
-	// target->symbol == '*'
-	
-	if (child == '-')
-		return canAbsorb(head, n, target->next);
-		
-	if (child == 'a')
-	{
-		Rule *h = head->next;
-		while (h != 0 && (h->symbol == '*' || (h->symbol == '+' && canAbsorb(head, n, h->children))))
-			h = h->next;
-		return h == 0 ? 'a' : 'h';
-	}
-
-	// child == 'h'	
-	return canAbsorb(head, n, target->next);
+	BOOLRETURN(false)
 }
 
 bool matchWholeRule(Rule *pattern, Rule *target)
 {
 	if (matchRule(pattern, target))
 		return true;
-	Rule *rest = pattern;
+	Rule **ref_rest = &pattern;
 	int n = 0;
-	while (rest != 0 && is_symbol(rest->symbol))
+	while ((*ref_rest) != 0 && is_symbol((*ref_rest)->symbol))
 	{
 		n++;
-		rest = rest->next;
+		ref_rest = &(*ref_rest)->next;
 	}
-	return    n > 0
-	       && canAbsorb(pattern, n, target) != '-'
-	       && matchRule(rest, target);
+	if (n == 0)
+		return false;
+	Rule *rest = *ref_rest;
+	*ref_rest = 0;
+	bool result =    canAbsorb(pattern, target)
+				  && matchRule(rest, target);
+	*ref_rest = rest;
+	return result;
 
 }			
 
@@ -472,6 +456,10 @@ void unit_tests();
 int main(int argc, char *argv[])
 {
 	unit_tests();
+
+#ifdef DEBUG
+	return 0;
+#endif
 
 	for (int i = 1; i < argc; i++)
 		if (strcmp(argv[i], "-v") == 0)
@@ -656,6 +644,9 @@ int main(int argc, char *argv[])
 
 void rule_match_test(const char *name, const char *p, const char *t, int nr, bool left, bool match)
 {
+#ifdef DEBUG
+	printf("\nTest %s\n", name);
+#endif
 	int old_nr = nr_symbols;
 	nr_symbols = nr;
 	char buf[100];
@@ -676,23 +667,32 @@ void rule_match_test(const char *name, const char *p, const char *t, int nr, boo
 
 void unit_tests()
 {
+	rule_match_test("test1", "01(01)+1@", "(01)+1@", 2, false, true);
+	rule_match_test("test2", "01(01)*1@", "(01)+1@", 2, false, true);
+	rule_match_test("test3", "01(01)*.@", "(01)*.@", 2, false, true);
+	rule_match_test("test4", "01(010*)+1@", "(010*)+1@", 2, false, true);
+	rule_match_test("test5", "01(1*01)+1@", "(1*01)+1@", 2, false, true);
+	rule_match_test("test6", "01(01+)*.@", "(01+)*.@", 2, false, true);
+	rule_match_test("test7", "00*1@", "0*1@", 2, false, true);
+	rule_match_test("test8", "01(01)*2@", "(01)*2@", 3, false, true);
+	rule_match_test("test9", "01(01)+2@", "(01)+2@", 3, false, true);
+	rule_match_test("test10", "0@(10(00)*)*00", ".@(10(00)*)*", 2, true, true);
+	rule_match_test("test11", "0@(10(00)*)+10", "0@(10(00)*)+", 2, true, true);
+	rule_match_test("test12", "0@(0*10(00)*)+10", "0@(0*10(00)*)+", 2, true, true);
+
 	//  Match not found #2  E: 0@10 1 101101(001)*0@" despite "E: (0)@(10)* 1 1(01)*101(001)*(0)@
 	rule_match_test("Issue#2", "0@10", "(0)@(10)*", 2, true, true);
 	rule_match_test("Issue#2", "101101(001)*0@", "1(01)*101(001)*(0)@", 2, false, true);
 	
 	// canAbsorb tests
-	/* Some of these are incorrect: 
-	rule_match_test("canAbsorb", "00+1@", "0+1@", 2, false, true);
-	rule_match_test("canAbsorb", "00*1@", "0*1@", 2, false, true);
-	rule_match_test("canAbsorb", "01(01)*2@", "(01)*2@", 3, false, true);
-	rule_match_test("canAbsorb", "01(01)+2@", "(01)+2@", 3, false, true);
-	rule_match_test("canAbsorb", "10(01)*2@", "(01)*2@", 3, false, false);
-	rule_match_test("canAbsorb", "0@(100*)*0", "0@(100*)*", 2, true, true);
-	rule_match_test("canAbsorb", "0@(10(00)*)*00", "0@(10(00)*)*", 2, true, true);
-	rule_match_test("canAbsorb", "0@(10(00)*)*00", ".@(10(00)*)*", 2, true, true);
-	rule_match_test("canAbsorb", "1@(10(00)*)*00", "1@(10(00)*)*", 2, true, false);
-	rule_match_test("canAbsorb", "0@(10(00)*)+00", "0@(10(00)*)+", 2, true, false);
-	rule_match_test("canAbsorb", "0@(10(00)*)+10", "0@(10(00)*)+", 2, true, true);
-	rule_match_test("canAbsorb", "0@(0*10(00)*)+10", "0@(0*10(00)*)+", 2, true, true);
-	*/
+	rule_match_test("canAbsorb1", "01(1+01)+1@", "(1+01)+1@", 2, false, false);
+	rule_match_test("canAbsorb2", "10(01)*2@", "(01)*2@", 3, false, false);
+	rule_match_test("canAbsorb3", "0@(100*)*0", "0@(100*)*", 2, true, true);
+	rule_match_test("canAbsorb4", "0@(10(00)*)*00", "0@(10(00)*)*", 2, true, true);
+	rule_match_test("canAbsorb5", "1@(10(00)*)*00", "1@(10(00)*)*", 2, true, false);
+	rule_match_test("canAbsorb6", "1@(10(00)*)+00", "1@(10(00)*)+", 2, true, true);
+	rule_match_test("canAbsort7", "00(((00)*1)+1)+1@", "(((00)*1)+1)+1@", 2, false, true);
+	rule_match_test("canAbsort8", "00(((00)*1)*((00)*22)+1)+1@", "(((00)*1)*((00)*22)+1)+1@", 3, false, true);
+	rule_match_test("canAbsort9", "00(((002*)*1)*((1*00)*22)+1)+1@", "(((002*)*1)*((1*00)*22)+1)+1@", 3, false, true);
+	rule_match_test("canAbsort10", "00(((002*)*1)*((1*00)*22)*1)+1@", "(((002*)*1)*((1*00)*22)*1)+1@", 3, false, false);
 }
