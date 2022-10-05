@@ -16,26 +16,27 @@ struct Rule
 	Rule *children;
 	Rule *next;
 	Rule() : children(0), next(0) {}
-	void print(bool left)
+	void print(bool left) { print(left, stdout); }
+	void print(bool left, FILE *fout)
 	{
 		if (left && next != 0)
-			next->print(left);
+			next->print(left, fout);
 		if (children != 0)
 		{
 			if (children->next == 0)
 			{
-				printf("%c", children->symbol);
+				fprintf(fout, "%c", children->symbol);
 			}
 			else
 			{
-				printf("(");
-				children->print(left);
-				printf(")");
+				fprintf(fout, "(");
+				children->print(left, fout);
+				fprintf(fout, ")");
 			}
 		}
-		printf("%c", symbol);
+		fprintf(fout, "%c", symbol);
 		if (!left && next != 0)
-			next->print(left);
+			next->print(left, fout);
 	}
 };
 
@@ -56,7 +57,7 @@ struct Pattern
 	Rule *right;
 	int used;
 	Pattern *next;
-	Pattern() : left(0), right(0), next(0), used(0) {}
+	Pattern() : left(0), right(0), next(0), used(0), kind(' ') {}
 	void print()
 	{
 		printf("%c: ", state);
@@ -66,7 +67,8 @@ struct Pattern
 			right->print(false);
 		else
 			printf("??");
-	}	
+	}
+	char kind;	
 };
 
 bool parse_error = false;
@@ -279,8 +281,9 @@ bool matchWholeRule(Rule *pattern, Rule *target)
 }			
 
 Pattern *patterns = 0;
+Pattern **ref_pattern = &patterns;
 
-bool find_matching3(Pattern *pattern)
+bool find_matching3(Pattern *pattern, bool nested)
 {
 	for (Pattern *target = patterns; target != 0; target = target->next)
 		if (   pattern->state == target->state
@@ -319,13 +322,13 @@ bool find_matching3(Pattern *pattern)
 	if (pattern->left->symbol == '*')
 	{
 		pattern->left->symbol = '+';
-		bool result = find_matching3(pattern);
+		bool result = find_matching3(pattern, true);
 		pattern->left->symbol = '*';
 		if (result)
 		{
 			Pattern pattern2 = *pattern;
 			pattern2.left = pattern->left->next;
-			if (find_matching3(&pattern2));
+			if (find_matching3(&pattern2, true));
 				return true;
 		}
 	}
@@ -333,33 +336,46 @@ bool find_matching3(Pattern *pattern)
 	if (pattern->right->symbol == '*')
 	{
 		pattern->right->symbol = '+';
-		bool result = find_matching3(pattern);
+		bool result = find_matching3(pattern, true);
 		pattern->right->symbol = '*';
 		if (result)
 		{
 			Pattern pattern2 = *pattern;
 			pattern2.right = pattern->right->next;
-			if (find_matching3(&pattern2));
+			if (find_matching3(&pattern2, true));
 				return true;
 		}
 	}
+
+	if (!nested)
+	{
+		printf("  (no match: ");
+		pattern->print();
+		printf(")\n");
 	
-	printf("  (no match: ");
-	pattern->print();
-	printf(")\n");
+		*ref_pattern = new Pattern();
+		(*ref_pattern)->state = pattern->state;
+		(*ref_pattern)->left = pattern->left;
+		(*ref_pattern)->head = pattern->head;
+		(*ref_pattern)->right = pattern->right;
+		(*ref_pattern)->used = 1;
+		(*ref_pattern)->kind = 'n';
+		ref_pattern = &(*ref_pattern)->next;
+	}
+	
 	return false;
 }
 
 bool find_matching2(Pattern *pattern)
 {
-	if (find_matching3(pattern))
+	if (find_matching3(pattern, false))
 		return true;
 	
 	Pattern pattern2 = *pattern;
 	while (pattern2.right->symbol == '*')
 	{
 		pattern2.right->symbol = '+';
-		bool found = find_matching3(&pattern2);
+		bool found = find_matching3(&pattern2, false);
 		pattern2.right->symbol = '*';
 		if (!found)
 		{
@@ -369,7 +385,7 @@ bool find_matching2(Pattern *pattern)
 			break;
 		}
 		pattern2.right = pattern2.right->next;
-		if (find_matching3(&pattern2))
+		if (find_matching3(&pattern2, false))
 			return true;
 	}
 	return false;
@@ -461,13 +477,25 @@ int main(int argc, char *argv[])
 	return 0;
 #endif
 
+	const char *fn = 0;
 	for (int i = 1; i < argc; i++)
 		if (strcmp(argv[i], "-v") == 0)
 			verbose_level = 1;
 		else if (strcmp(argv[i], "-vv") == 0)
 			verbose_level = 2;
+		else if (i + 1 < argc && strcmp(argv[i], "-a") == 0)
+			fn = argv[++i];
 	
 	FILE *fin = stdin;
+	if (fn != 0)
+	{
+		fin = fopen(fn, "r");
+		if (fin == 0)
+		{
+			printf("Cannot open '%s'\n", fn);
+			return 0;
+		}
+	}
 	
 	char buffer[100];
 	
@@ -532,7 +560,6 @@ int main(int argc, char *argv[])
 	printf("\n");
 
 
-	Pattern **ref_pattern = &patterns;
 	while (fgets(buffer, 100, fin))
 	{
 		char *s = buffer;
@@ -573,27 +600,49 @@ int main(int argc, char *argv[])
 		}
 	}
 	
+	if (fn != 0)
+		fclose(fin);
+
 	for (Pattern *pattern1 = patterns; pattern1 != 0; pattern1 = pattern1->next)
 	{
+		bool before = false;
 		for (Pattern *pattern2 = patterns; pattern2 != 0; pattern2 = pattern2->next)
-			if (   pattern1 != pattern2
-				&& pattern1->state == pattern2->state
-				&& pattern1->head == pattern2->head
-				&& matchRule(pattern1->left, pattern2->left)
-				&& matchRule(pattern1->right, pattern2->right))
+			if (pattern1 == pattern2)
+				before = true;
+			else if (   pattern1->state == pattern2->state
+					 && pattern1->head == pattern2->head
+					 && matchRule(pattern1->left, pattern2->left)
+					 && matchRule(pattern1->right, pattern2->right))
 			{
-				printf("Error: pattern is ");
-				pattern1->print();
-				printf(" matches ");
-				pattern2->print();
-				printf("\n");
+				if (   equal(pattern1->left, pattern2->left)
+					&& equal(pattern1->right, pattern2->right))
+				{
+					if (!before)
+					{
+						printf("Error: pattern ");
+						pattern1->print();
+						printf(" is repeated\n");
+						pattern2->kind = '=';
+					}
+				}
+				else
+				{
+					printf("Error: pattern is ");
+					pattern1->print();
+					printf(" matches ");
+					pattern2->print();
+					printf("\n");
+					pattern1->kind = '<';
+				}
 				break;
 			}
 	}
 	
 	for (Pattern *pattern = patterns; pattern != 0; pattern = pattern->next)
 	{
-		
+		if (pattern->kind != ' ')
+			continue;
+			
 		int state = pattern->state - 'A';
 		int symbol = pattern->head - '0';
 		const char *tr = tm[state][symbol];
@@ -637,6 +686,41 @@ int main(int argc, char *argv[])
 			pattern->print();
 			printf("\n");
 		}
+	
+	if (fn != 0)
+	{
+		FILE *fout = fopen(fn, "w");
+		
+		for (int i = 0; i < nr_states; i++)
+		{
+			if (i > 0)
+				fprintf(fout, "_");
+			for (int j = 0; j < nr_symbols; j++)
+				fprintf(fout, "%c%c%c", tm[i][j][0], tm[i][j][1], tm[i][j][2]);
+		}
+		fprintf(fout, "\n\n");
+		
+		bool new_patterns = false;
+		
+		for (Pattern *pattern = patterns; pattern != 0; pattern = pattern->next)
+		{
+			if (pattern->kind == '=')
+				fprintf(fout, "/ Repeated ");
+			else if (pattern->kind == '<')
+				fprintf(fout, "/ Matching ");
+			else if (pattern->kind == 'n' && !new_patterns)
+			{
+				fprintf(fout, "\n/ New:\n");
+				new_patterns = true;
+			}
+			fprintf(fout, "%c: ", pattern->state);
+			pattern->left->print(true, fout);
+			fprintf(fout, " %c ", pattern->head);
+			pattern->right->print(false, fout);
+			fprintf(fout, "\n");
+		}
+		fclose(fout);
+	}
 	
 	return 0;
 }
