@@ -21,20 +21,38 @@ struct Rule
 	{
 		if (left && next != 0)
 			next->print(left, fout);
-		if (children != 0)
+		if (symbol == '|')
 		{
-			if (children->next == 0)
+			fprintf(fout, "(");
+			for (Rule *child = children; child != 0; child = child->next)
 			{
-				fprintf(fout, "%c", children->symbol);
+				child->children->print(left, fout);
+				if (child->next != 0)
+					fprintf(fout, "|");
 			}
-			else
-			{
-				fprintf(fout, "(");
-				children->print(left, fout);
-				fprintf(fout, ")");
-			}
+			fprintf(fout, ")");
+			return;
 		}
-		fprintf(fout, "%c", symbol);
+		else
+		{
+			if (children != 0)
+			{
+				if (children->next == 0)
+				{
+					if (children->symbol == '|')
+						children->print(left, fout);
+					else
+						fprintf(fout, "%c", children->symbol);
+				}
+				else
+				{
+					fprintf(fout, "(");
+					children->print(left, fout);
+					fprintf(fout, ")");
+				}
+			}
+			fprintf(fout, "%c", symbol);
+		}
 		if (!left && next != 0)
 			next->print(left, fout);
 	}
@@ -73,19 +91,22 @@ struct Pattern
 
 bool parse_error = false;
 
-Rule *parse_rule(char *&s, bool left)
+Rule *parse_rule(char *&s, bool left);
+
+Rule *parse_rule_elem(char *&s, bool left)
 {
 	Rule *result = 0;
 	Rule **ref_rule = &result;
-	while (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != '\0' && *s != ')')
+	while (*s != ' ' && *s != '\t' && *s != '\r' && *s != '\n' && *s != '\0' && *s != ')' && *s != '|')
 	{
 		Rule *new_rule = new Rule;
 		if (*s == '(')
 		{
 			s++;
-			new_rule->children = parse_rule(s, left);
+			Rule *children = children = parse_rule(s, left);
 			if (*s != ')')
 			{
+				printf("Error2 at: '%s'", s);
 				parse_error = true;
 				return 0;
 			}
@@ -93,9 +114,15 @@ Rule *parse_rule(char *&s, bool left)
 			if (*s == '+' || *s == '*' || *s == '@')
 			{
 				new_rule->symbol = *s++;
+				new_rule->children = children;
+			}
+			else if (children->symbol == '|')
+			{
+				new_rule = children;
 			}
 			else
 			{
+				printf("Error3 at: '%s'", s);
 				parse_error = true;
 				return 0;
 			}
@@ -110,6 +137,12 @@ Rule *parse_rule(char *&s, bool left)
 			}
 			new_rule->symbol = *s++;
 		}
+		else 
+		{
+			printf("Error1 at: '%s'", s);
+			parse_error = true;
+			return 0;
+		}
 		if (left)
 		{
 			new_rule->next = *ref_rule;
@@ -123,6 +156,31 @@ Rule *parse_rule(char *&s, bool left)
 	}
 	return result;
 }
+
+Rule *parse_rule(char *&s, bool left)
+{
+	Rule *rule_elem = parse_rule_elem(s, left);
+	if (*s == '|')
+	{
+		Rule *or_rule = new Rule;
+		or_rule->symbol = '|';
+		Rule **ref_rule = &or_rule->children;
+		for (;;)
+		{
+			*ref_rule = new Rule;
+			(*ref_rule)->symbol = 'a';
+			(*ref_rule)->children = rule_elem;
+			ref_rule = &(*ref_rule)->next;
+			if (*s != '|')
+				break;
+			s++;
+			rule_elem = parse_rule_elem(s, left);
+		}
+		return or_rule;
+	}
+	return rule_elem;
+}
+
 
 bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder);
 
@@ -166,6 +224,46 @@ bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder)
 		remainder = 0;
 		BOOLRETURN(true)
 	}
+	
+	if (target->symbol == '|')
+	{
+		if (pattern->symbol == '|')
+		{
+			for (Rule *pattern_alt = pattern->children; pattern_alt != 0; pattern_alt = pattern_alt->next)
+			{
+				bool a_match = false;
+				for (Rule *alt = target->children; alt != 0; alt = alt->next)
+				{
+					Rule *alt_remainder = 0;
+					if (   matchRulePart(pattern_alt->children, false, alt->children, alt_remainder)
+					    && alt_remainder == 0)
+					{
+						a_match = true;
+						break;
+					}
+				}
+				if (!a_match)
+					BOOLRETURN(false);
+			}
+			BOOLRETURN(matchRulePart(pattern->next, false, target->next, remainder));
+		}
+		else
+		{
+			for (Rule *alt = target->children; alt != 0; alt = alt->next)
+			{
+				Rule *alt_remainder = 0;
+				if (   matchRulePart(pattern, false, alt->children, alt_remainder)
+				    && matchRulePart(alt_remainder, false, target->next, alt_remainder))
+				{
+					remainder = alt_remainder;
+					BOOLRETURN(true);
+				}
+			}
+			BOOLRETURN(false);
+		}
+	}
+	if (pattern->symbol == '|')
+		BOOLRETURN(false);
 	
 	char sym = '\0';
 	int target_nr = 0;
@@ -437,6 +535,7 @@ void process_pattern(Pattern *pattern, Rule *new_pull, Rule *new_push, bool move
 
 void expand_pattern(Pattern *pattern, Rule *pull_rule, Rule *new_push, bool move_right, const char *tr)
 {
+
 	if (pull_rule->symbol == '@')
 	{
 		process_pattern(pattern, pull_rule, new_push, move_right, pull_rule->children->symbol, tr);
@@ -460,6 +559,23 @@ void expand_pattern(Pattern *pattern, Rule *pull_rule, Rule *new_push, bool move
 		expand_pattern(pattern, new_pull, new_push, move_right, tr);
 		if (pull_rule->symbol == '*')
 			expand_pattern(pattern, pull_rule->next, new_push, move_right, tr);
+	}
+	else if (pull_rule->symbol == '|')
+	{
+		for (Rule *alt = pull_rule->children; alt != 0; alt = alt->next)
+		{
+			Rule *new_pull;
+			Rule **ref_new = &new_pull;
+			for (Rule *rule = alt->children; rule != 0; rule = rule->next)
+			{
+				*ref_new = new Rule;
+				(*ref_new)->symbol = rule->symbol;
+				(*ref_new)->children = rule->children;
+				ref_new = &(*ref_new)->next;
+			}
+			*ref_new = pull_rule->next;
+			expand_pattern(pattern, new_pull, new_push, move_right, tr);
+		}
 	}
 	else
 	{
@@ -779,4 +895,16 @@ void unit_tests()
 	rule_match_test("canAbsort8", "00(((00)*1)*((00)*22)+1)+1@", "(((00)*1)*((00)*22)+1)+1@", 3, false, true);
 	rule_match_test("canAbsort9", "00(((002*)*1)*((1*00)*22)+1)+1@", "(((002*)*1)*((1*00)*22)+1)+1@", 3, false, true);
 	rule_match_test("canAbsort10", "00(((002*)*1)*((1*00)*22)*1)+1@", "(((002*)*1)*((1*00)*22)*1)+1@", 3, false, false);
+	
+	rule_match_test("match AA* with A", "10*10(10*10)*", "(10*10)*", 2, false, true);
+
+	// Tests added for |
+	rule_match_test("match or1", "1", "(0|1)", 2, false, true);
+	rule_match_test("match or2", "(0|1)", "(0|1)", 2, false, true);
+	rule_match_test("match or3", "(1|0)1", "(0|1)1", 2, false, true);
+	rule_match_test("match or4", "(1|0)1", "(0|11)1", 2, false, false);
+	rule_match_test("match or5", "(1|0|2)2", "(0|11)2", 3, false, false);
+	rule_match_test("match or6", "(01|00)1", "(00|01+)1", 2, false, true);
+	rule_match_test("match or7", "0@1(010*1|00)*010*1", "0@1(010*1|00)*", 2, true, true);
+
 }
