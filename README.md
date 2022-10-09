@@ -25,6 +25,8 @@ the '.' stand for any symbol, '+' for a repetition of one or more times
 of the sub expression to the left, '*' for a repetition zero or more
 times of the sub expression to the left, and '@' for an infinite repetition
 of the sub expression to the left. '(' and ')' can be used for grouping.
+Furthermore, '|' can be used to specify alternatives, where only one
+of the alternatives need to be matched.
 
 The program takes every pattern, applies one step of the Turing Machine
 to it, and verifies if the resulting pattern matches with one of the
@@ -38,14 +40,23 @@ If the tape is of the form s@ it is rewritten as ss@.
 
 Let L(E) stand for the language produced the regular expression E, than
 we say that A matches B if every string produced by L(A) is included in
-L(B). It is known that L(AA+) is equal to L(A+A) and that L(A*A) is equal to L(A+).
+L(B). It is known that L(AA+) is equal to L(A+A) and that L(AA*) is equal to L(A+).
 The following rules apply:
 * A matches .@
 * A matches A
 * A+ matches A*
-* A+A matches A+
+* AA+ matches A+
 * AB matches CD if A matches C and B matches D
 * A* matched B* if A matches B
 * AB* matches C+ if A matches C and B matches C
 * AB* matches C* if A matches C and B matches C
 * AB+ matches C* if A matches C and B matches C
+* A matched (B|C) if A matches B or A matches C
+* (A|B) matches C if A matches C and B matches C
+
+The program has the following command line options
+* `-v`: Verbose output
+* `-vv`: Extra verbose output
+* `-csa`: Will clean-up (right) rules like `(01)*.@` into `.@`
+* `-a` followed by a filename: Read from the file and rewrites it, commenting out repeated and/or matched rules and add missing rules at the end.
+* `-ru`: When used in combination with `-a`: Also comment out unused rules.
