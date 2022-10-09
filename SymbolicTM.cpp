@@ -181,7 +181,6 @@ Rule *parse_rule(char *&s, bool left)
 	return rule_elem;
 }
 
-
 bool matchRulePart(Rule *pattern, bool plus, Rule *target, Rule *&remainder);
 
 bool matchRule(Rule *pattern, Rule *target)
@@ -583,6 +582,23 @@ void expand_pattern(Pattern *pattern, Rule *pull_rule, Rule *new_push, bool move
 	}
 }
 
+bool clean_star_any(Rule **ref_rule, bool apply)
+{
+	for (; *ref_rule != 0; ref_rule = &(*ref_rule)->next)
+	{
+		Rule *rule = *ref_rule;
+		while (rule->symbol == '*')
+			rule = rule->next;
+		if (rule != *ref_rule && rule->symbol == '@' && rule->next == 0 && rule->children->symbol == '.' && rule->children->next == 0)
+		{
+			if (apply)
+				*ref_rule = rule;
+			return true;
+		}
+	}
+	return false;
+}
+
 void unit_tests();
 
 int main(int argc, char *argv[])
@@ -593,12 +609,19 @@ int main(int argc, char *argv[])
 	return 0;
 #endif
 
+	bool opt_clean_star_any = false;
+	bool opt_remove_unused = false;
+
 	const char *fn = 0;
 	for (int i = 1; i < argc; i++)
 		if (strcmp(argv[i], "-v") == 0)
 			verbose_level = 1;
 		else if (strcmp(argv[i], "-vv") == 0)
 			verbose_level = 2;
+		else if (strcmp(argv[i], "-csa") == 0)
+			opt_clean_star_any = true;
+		else if (strcmp(argv[i], "-ru") == 0)
+			opt_remove_unused = true;
 		else if (i + 1 < argc && strcmp(argv[i], "-a") == 0)
 			fn = argv[++i];
 	
@@ -718,6 +741,21 @@ int main(int argc, char *argv[])
 	
 	if (fn != 0)
 		fclose(fin);
+		
+	if (opt_clean_star_any)
+	{
+		for (Pattern *pattern = patterns; pattern != 0; pattern = pattern->next)
+			if (clean_star_any(&pattern->left, false) || clean_star_any(&pattern->right, false))
+			{
+				printf("Error: pattern ");
+				pattern->print();
+				clean_star_any(&pattern->left, true);
+				clean_star_any(&pattern->right, true);
+				printf(" is equivalent with ");
+				pattern->print();
+				printf("\n");
+		}
+	}
 
 	for (Pattern *pattern1 = patterns; pattern1 != 0; pattern1 = pattern1->next)
 	{
@@ -824,6 +862,19 @@ int main(int argc, char *argv[])
 				fprintf(fout, "/ Repeated ");
 			else if (pattern->kind == '<')
 				fprintf(fout, "/ Matching ");
+			else if (   opt_remove_unused
+					 && pattern->used == 0
+					 && !(   pattern->state == 'A'
+						  && pattern->left->symbol == '@'
+						  && pattern->left->next == 0
+						  && pattern->left->children->symbol == '0'
+						  && pattern->left->children->next == 0
+						  && pattern->head == '0'
+						  && pattern->right->symbol == '@'
+						  && pattern->right->next == 0
+						  && pattern->right->children->symbol == '0'
+						  && pattern->right->children->next == 0))
+				 fprintf(fout, "/ Unused ");
 			else if (pattern->kind == 'n' && !new_patterns)
 			{
 				fprintf(fout, "\n/ New:\n");
@@ -907,4 +958,5 @@ void unit_tests()
 	rule_match_test("match or6", "(01|00)1", "(00|01+)1", 2, false, true);
 	rule_match_test("match or7", "0@1(010*1|00)*010*1", "0@1(010*1|00)*", 2, true, true);
 
+	rule_match_test("Sketel36_1", ".@(11)*011", ".@(00)*011", 2, true, true);
 }
