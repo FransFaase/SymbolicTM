@@ -599,6 +599,20 @@ bool clean_star_any(Rule **ref_rule, bool apply)
 	return false;
 }
 
+bool is_initial_pattern(Pattern *pattern)
+{
+	return    pattern->state == 'A'
+		   && pattern->left->symbol == '@'
+		   && pattern->left->next == 0
+		   && pattern->left->children->symbol == '0'
+		   && pattern->left->children->next == 0
+		   && pattern->head == '0'
+		   && pattern->right->symbol == '@'
+		   && pattern->right->next == 0
+		   && pattern->right->children->symbol == '0'
+		   && pattern->right->children->next == 0;
+}
+
 void unit_tests();
 
 int main(int argc, char *argv[])
@@ -779,9 +793,9 @@ int main(int argc, char *argv[])
 						pattern2->kind = '=';
 					}
 				}
-				else
+				else if (!is_initial_pattern(pattern1))
 				{
-					printf("Error: pattern is ");
+					printf("Error: pattern ");
 					pattern1->print();
 					printf(" matches ");
 					pattern2->print();
@@ -824,17 +838,7 @@ int main(int argc, char *argv[])
 	
 	printf("\n\n");
 	for (Pattern *pattern = patterns; pattern != 0; pattern = pattern->next)
-		if (   pattern->used == 0
-			&& !(   pattern->state == 'A'
-				 && pattern->left->symbol == '@'
-				 && pattern->left->next == 0
-				 && pattern->left->children->symbol == '0'
-				 && pattern->left->children->next == 0
-				 && pattern->head == '0'
-				 && pattern->right->symbol == '@'
-				 && pattern->right->next == 0
-				 && pattern->right->children->symbol == '0'
-				 && pattern->right->children->next == 0))
+		if (   pattern->used == 0 && !is_initial_pattern(pattern))
 		{
 			printf("Warning: Unused rule: ");
 			pattern->print();
