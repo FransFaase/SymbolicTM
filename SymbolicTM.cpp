@@ -814,7 +814,13 @@ int main(int argc, char *argv[])
 		int state = pattern->state - 'A';
 		int symbol = pattern->head - '0';
 		const char *tr = tm[state][symbol];
-		if (tr[0] == '-') continue;
+		if (tr[0] == '-')
+		{
+			printf("Error: pattern ");
+			pattern->print();
+			printf(" HALTS\n");
+			continue;
+		}
 		
 		bool move_right = tr[1] == 'R';
 		Rule *pull_rule, *push_rule;
